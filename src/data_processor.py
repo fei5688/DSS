@@ -1,98 +1,58 @@
 """
-This module contains the various procedures for processing data.
+Data processing for Titanic dataset.
 """
 
 import argparse
-import numpy as np
-import pandas as pd
 import logging
+import pandas as pd
 
 logging.basicConfig(level=logging.INFO)
 
-def load_data(data_path):
-    """
-    Read dataset from given directory.
-        Parameters:
-            data_path (str): directory containing dataset in csv
-        Returns:
-            df: dataframe containing the input data
-    """
-    df = pd.read_csv(data_path)
+FEATURES = ["Pclass", "Sex", "Age", "SibSp", "Parch", "Fare", "Embarked"]
+LABEL = "Survived"
+
+
+def load_data(data_path: str) -> pd.DataFrame:
+    return pd.read_csv(data_path)
+
+
+def save_data(data_path: str, df: pd.DataFrame) -> None:
+    df.to_csv(data_path.replace(".csv", "_processed.csv"), index=False)
+
+
+def preprocess(df: pd.DataFrame) -> pd.DataFrame:
+    # 只保留训练需要的列
+    required_cols = FEATURES + [LABEL]
+
+    missing = [c for c in required_cols if c not in df.columns]
+    if missing:
+        raise ValueError(f"Missing required columns: {missing}")
+
+    df = df[required_cols].copy()
+
+    # 统一字符串格式
+    df["Sex"] = df["Sex"].astype(str).str.strip().str.lower()
+    df["Embarked"] = df["Embarked"].astype(str).str.strip().str.upper()
+
     return df
 
-def save_data(data_path, df):
-    """
-    Save data to directory.
-        Parameters:
-            data_path (str): Directory for saving dataset
-            df: Dataframe containing data to save
-        Returns:
-            None: No returns required
-    """
-    df.to_csv(data_path.replace('.csv','_processed.csv'), index=False)
-    return None
 
-def log_txf(df, cols: list):
-    """
-    Perform log transformation on specified columns in dataset.
-        Parameters:
-            df: input dataframe
-            cols (list): columns that need log transformation
-        Returns:
-            df: resultant dataframe containing newly transformed columns
-    """
-    for col in cols:
-        df[col] = df[col].clip(lower=0)
-        df['log_'+col] = np.log(df[col]+1)
-    return df
-
-def remap_dependents(x):
-    """
-    Convert no_of_dependents into categorical variable.
-        Parameters:
-            x (int): Input category
-        Returns:
-            New category in (str)
-    """
-    if x == 0:
-        return 'no_dep'
-    if x == 1:
-        return '1_dep'
-    if x > 1 and x <= 3:
-        return '2_to_3_dep'
-    return 'more_than_3_dep'
-
-def preprocess(df):
-    """
-    Orchestrate data pre-processing procedures.
-        Parameters:
-            df: Input dataframe to be pre-processed
-        Returns:
-            df: Resultant dataframe after pre-processing
-    """
-    df = log_txf(df, ['residential_assets_value','loan_amount'])
-    df['dep_cat'] = df['no_of_dependents'].map(remap_dependents)
-    return df
-
-def run(data_path):
-    """
-    Main script to read and pre-process data.
-        Parameters:
-            data_path (str): Directory containing dataset in csv
-        Returns:
-            df: Dataframe containing the final pre-processed data
-    """
-    logging.info('Load data..')
+def run(data_path: str) -> pd.DataFrame:
+    logging.info("Load data...")
     df = load_data(data_path)
-    logging.info('Processing data...')
+
+    logging.info("Processing data...")
     df = preprocess(df)
-    logging.info('Save data...')
+
+    logging.info("Save processed data...")
     save_data(data_path, df)
-    logging.info('Completed')
+
+    logging.info("Completed")
     return df
+
 
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser()
-    argparser.add_argument("--data_path", type=str)
+    argparser.add_argument("--data_path", type=str, required=True)
     args = argparser.parse_args()
     run(args.data_path)
