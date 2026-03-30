@@ -1,5 +1,5 @@
 """
-This module automates model training.
+Training script for Titanic survival prediction.
 """
 
 import argparse
@@ -7,74 +7,90 @@ import logging
 
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OneHotEncoder, MinMaxScaler
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.impute import SimpleImputer
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, classification_report
 
 from src import data_processor
 from src import model_registry
-from src import evaluation
-from src.config import appconfig
 
 logging.basicConfig(level=logging.INFO)
 
-features = appconfig['Model']['features'].split(',')
-categorical_features = appconfig['Model']['categorical_features'].split(',')
-numerical_features = appconfig['Model']['numerical_features'].split(',')
-label = appconfig['Model']['label']
-fdr_max = float(appconfig['Evaluation']['fdr'])
-recall_min = float(appconfig['Evaluation']['recall'])
+FEATURES = ["Pclass", "Sex", "Age", "SibSp", "Parch", "Fare", "Embarked"]
+CATEGORICAL_FEATURES = ["Sex", "Embarked"]
+NUMERICAL_FEATURES = ["Pclass", "Age", "SibSp", "Parch", "Fare"]
+LABEL = "Survived"
 
-def run(data_path):
-    """
-    Main script to perform model training.
-        Parameters:
-            data_path (str): Directory containing the training dataset in csv
-        Returns:
-            None: No returns required
-    """
-    logging.info('Process Data...')
+
+def run(data_path: str):
+    logging.info("Process Data...")
     df = data_processor.run(data_path)
-    
-    numerical_transformer = MinMaxScaler()
-    categorical_transformer = OneHotEncoder(handle_unknown="ignore")
-    preprocessor = ColumnTransformer(
-        transformers=[
-            ("num", numerical_transformer, numerical_features),
-            ("cat", categorical_transformer, categorical_features),
+
+    X = df[FEATURES]
+    y = df[LABEL]
+
+    numeric_transformer = Pipeline(
+        steps=[
+            ("imputer", SimpleImputer(strategy="median"))
         ]
     )
-    
-    # Train-Test Split
-    logging.info('Start Train-Test Split...')
-    X_train, X_test, y_train, y_test = train_test_split(df[features], \
-                                                        df[label], \
-                                                        test_size=appconfig.getfloat('Model','test_size'), \
-                                                        random_state=0)
-    
-    # Train Classifier
-    logging.info('Start Training...')
-    random_forest = RandomForestClassifier(n_estimators=appconfig.getint('Hyperparameters','rf_n_estimators'),
-                                           max_depth=appconfig.getint('Hyperparameters','rf_max_depth'), 
-                                           class_weight = appconfig.get('Hyperparameters','rf_class_weight'),
-                                           n_jobs=appconfig.getint('Hyperparameters','rf_n_jobs'))
-    
-    clf = Pipeline(steps=[("preprocessor", preprocessor),\
-                          ("binary_classifier", random_forest)
-                         ])
+
+    categorical_transformer = Pipeline(
+        steps=[
+            ("imputer", SimpleImputer(strategy="most_frequent")),
+            ("onehot", OneHotEncoder(handle_unknown="ignore"))
+        ]
+    )
+
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ("num", numeric_transformer, NUMERICAL_FEATURES),
+            ("cat", categorical_transformer, CATEGORICAL_FEATURES),
+        ]
+    )
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42, stratify=y
+    )
+
+    logging.info("Start Training...")
+    clf = Pipeline(
+        steps=[
+            ("preprocessor", preprocessor),
+            ("classifier", RandomForestClassifier(
+                n_estimators=200,
+                max_depth=5,
+                random_state=42
+            ))
+        ]
+    )
+
     clf.fit(X_train, y_train)
-    
-    # Evaluate and Deploy
-    if evaluation.run(y_test, clf.predict(X_test)):
-        logging.info('Persisting model...')
-        mdl_meta = { 'name': appconfig['Model']['name'], 'metrics': evaluation.get_eval_metrics(y_test, clf.predict(X_test)) }
-        model_registry.register(clf, features, mdl_meta)
-    
-    logging.info('Training completed.')
+
+    y_pred = clf.predict(X_test)
+    acc = accuracy_score(y_test, y_pred)
+
+    logging.info(f"Accuracy: {acc:.4f}")
+    logging.info("\n" + classification_report(y_test, y_pred))
+
+    mdl_meta = {
+        "name": "titanic_model",
+        "metrics": {
+            "accuracy": float(acc)
+        }
+    }
+
+    logging.info("Persisting model...")
+    model_registry.register(clf, FEATURES, mdl_meta)
+
+    logging.info("Training completed.")
     return None
+
 
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser()
-    argparser.add_argument("--data_path", type=str)
+    argparser.add_argument("--data_path", type=str, required=True)
     args = argparser.parse_args()
     run(args.data_path)
